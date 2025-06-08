@@ -1,0 +1,662 @@
+
+Initial Project Structure:
+saylo.hire/
+├── backend/
+│   ├── .env
+│   ├── venv/ (or where your virtual environment lives)
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── routes/
+│   │   │   ├── auth.py
+│   │   │   ├── interview.py
+│   │   │   ├── resume.py
+│   │   │   └── ...
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── user.py
+│   │   │   ├── resume.py
+│   │   │   ├── job_description.py
+│   │   │   ├── interview_session.py
+│   │   │   └── ...
+│   │   ├── services/
+│   │   │   ├── gemini_service.py
+│   │   │   ├── tavus_service.py
+│   │   │   └── pdf_service.py
+│   │   ├── config.py
+│   │   ├── extensions.py (for SQLAlchemy, JWT, etc.)
+│   │   └── utils.py
+│   ├── run.py
+│   ├── requirements.txt
+│   └── README.md
+│
+└── frontend/
+    ├── public/
+    ├── src/
+    │   ├── assets/
+    │   ├── components/
+    │   │   ├── auth/
+    │   │   ├── common/
+    │   │   ├── interview/
+    │   │   └── ...
+    │   ├── hooks/
+    │   ├── pages/
+    │   │   ├── AuthPage.jsx
+    │   │   ├── DashboardPage.jsx
+    │   │   ├── InterviewSetupPage.jsx
+    │   │   ├── InterviewRoomPage.jsx
+    │   │   ├── InterviewHistoryPage.jsx
+    │   │   └── ...
+    │   ├── services/ (API calls)
+    │   │   ├── authApi.js
+    │   │   ├── interviewApi.js
+    │   │   └── ...
+    │   ├── context/ (for AuthContext, etc.)
+    │   ├── styles/ (Tailwind config, custom CSS)
+    │   ├── App.jsx
+    │   ├── main.jsx
+    │   └── index.css
+    ├── package.json
+    ├── tailwind.config.js
+    ├── vite.config.js
+    └── README.md
+Use code with caution.
+
+Flask App Setup:
+backend/requirements.txt:
+Flask
+Flask-SQLAlchemy
+psycopg2-binary  # PostgreSQL adapter
+python-dotenv
+Flask-CORS      # For frontend communication
+Flask-JWT-Extended
+Werkzeug
+Use code with caution.
+Install Dependencies: pip install -r backend/requirements.txt
+backend/.env:
+DATABASE_URL="postgresql://user:password@host:port/saylo_hire"
+SECRET_KEY="YOUR_SUPER_SECRET_KEY"
+JWT_SECRET_KEY="YOUR_JWT_SECRET_KEY"
+GEMINI_API_KEY="your_gemini_api_key_here"
+TAVUS_API_KEY="your_tavus_api_key_here"
+TAVUS_API_URL="https://api.tavus.ai/v2" # Confirm correct Tavus API URL
+Use code with caution.
+backend/app/config.py: Loads from .env.
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Config:
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost:5432/saylo_hire')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SECRET_KEY = os.getenv('SECRET_KEY', 'default_secret_key')
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'default_jwt_secret_key')
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    TAVUS_API_KEY = os.getenv('TAVUS_API_KEY')
+    TAVUS_API_URL = os.getenv('TAVUS_API_URL')
+    # Add paths for storing uploaded files and generated PDFs
+    UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
+    GENERATED_PDFS_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'generated_pdfs')
+Use code with caution.
+Python
+backend/app/extensions.py:
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager
+from flask_cors import CORS
+
+db = SQLAlchemy()
+jwt = JWTManager()
+cors = CORS()
+Use code with caution.
+Python
+backend/app/__init__.py: Flask app initialization.
+from flask import Flask
+from app.config import Config
+from app.extensions import db, jwt, cors
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+
+    db.init_app(app)
+    jwt.init_app(app)
+    cors.init_app(app, resources={r"/*": {"origins": "*"}}) # Be more specific in production
+
+    with app.app_context():
+        from app.routes import auth_bp, interview_bp, resume_bp # Import blueprints later
+        app.register_blueprint(auth_bp, url_prefix='/api/auth')
+        # Register other blueprints as they are created
+
+        db.create_all() # Creates tables based on models
+
+    return app
+Use code with caution.
+Python
+backend/run.py: For running the app.
+from app import create_app
+
+app = create_app()
+
+if __name__ == '__main__':
+    app.run(debug=True) # Set debug=False for production
+Use code with caution.
+Python
+Database Models (backend/app/models/):
+user.py:
+from app.extensions import db
+from werkzeug.security import generate_password_hash, check_password_hash
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    first_name = db.Column(db.String(64))
+    last_name = db.Column(db.String(64))
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    interviews = db.relationship('InterviewSession', backref='user', lazy=True)
+    resumes = db.relationship('Resume', backref='user', lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+Use code with caution.
+Python
+
+Authentication Routes (backend/app/routes/auth.py):
+Create a Flask Blueprint for auth.
+/api/auth/register (POST):
+Get email, password, etc. from request.
+Hash password.
+Create new User in DB.
+Return success message.
+/api/auth/login (POST):
+Get email, password.
+Verify user exists and password is correct.
+Generate JWT Access and Refresh Tokens (create_access_token, create_refresh_token).
+Return tokens.
+/api/auth/refresh (POST):
+Use jwt_required(refresh=True) decorator.
+Generate new access token.
+/api/auth/me (GET):
+Use jwt_required() decorator.
+Get current_user identity.
+Return user data (e.g., email, first name).
+Phase 2: Frontend Setup & Core UI (React & Tailwind)
+Build the basic UI structure, authentication flow, and ensure API communication works.
+React App Setup:
+Navigate to frontend/.
+Create React App with Vite: npm create vite@latest . -- --template react (or yarn create vite . --template react)
+Install dependencies: npm install (or yarn).
+Tailwind CSS Setup:
+npm install -D tailwindcss postcss autoprefixer
+npx tailwindcss init -p (creates tailwind.config.js and postcss.config.js)
+Configure tailwind.config.js content array to scan React files: content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"].
+Add Tailwind directives to frontend/src/index.css:
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+Use code with caution.
+Css
+Install Frontend Dependencies:
+npm install axios react-router-dom
+Basic Routing (frontend/src/App.jsx):
+Use react-router-dom to set up routes for /, /login, /register, /dashboard, /interview/setup, /interview/room/:id, /history, /profile.
+Implement protected routes using React Context API for authentication state.
+Authentication UI (frontend/src/pages/AuthPage.jsx, frontend/src/components/auth/LoginForm.jsx, RegisterForm.jsx):
+Create responsive forms with Tailwind.
+API Service (frontend/src/services/authApi.js):
+Create Axios instances and functions to call Flask API endpoints (/api/auth/register, /api/auth/login).
+Store JWT tokens securely (e.g., localStorage or sessionStorage for MVP, more robust options for production).
+User Dashboard (frontend/src/pages/DashboardPage.jsx):
+After login, redirect users here.
+Display welcome message.
+Navigation links to other sections (Resume, Interview Setup, History, Profile).
+Phase 3: Resume Parsing & Job Setup (Tavus Agent & Backend Logic)
+Enable users to upload resumes and define job descriptions.
+Backend (Flask):
+New Models (backend/app/models/):
+Resume(id, user_id, file_path, original_filename, upload_date, extracted_job_title_from_tavus, extracted_skills_json, raw_text_content)
+JobDescription(id, user_id, title, description_text, skills_keywords, created_at)
+File Upload Utility: In backend/app/utils.py, add a function to save uploaded files securely.
+backend/app/services/tavus_service.py:
+import requests
+from app.config import Config
+
+class TavusService:
+    def __init__(self):
+        self.api_key = Config.TAVUS_API_KEY
+        self.api_url = Config.TAVUS_API_URL
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+    def _make_request(self, method, endpoint, data=None, files=None):
+        url = f"{self.api_url}/{endpoint}"
+        if files:
+            # Requests for file uploads need special handling for content type
+            del self.headers["Content-Type"]
+        response = requests.request(method, url, json=data, files=files, headers=self.headers)
+        if files:
+            self.headers["Content-Type"] = "application/json" # Restore
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        return response.json()
+
+    def process_resume_for_interview_context(self, file_content, filename):
+        """
+        Sends resume file to Tavus or another OCR/LLM for processing to extract relevant context.
+        The Tavus docs refer to using Tavus agent for getting data from pdf resumes for the *interview*,
+        so this might be implicitly handled by how the Tavus agent conducts the interview based on
+        uploaded resume info, rather than an explicit "extract data from PDF" API endpoint.
+        If Tavus does *not* provide a direct API for extracting 'job title'/'job description'
+        from a resume PDF *before* an interview call starts, you'll need a separate library
+        (e.g., pypdf + a custom LLM call via Gemini or OpenAI) to get these metadata fields.
+        For the purpose of this pathway, let's *assume* Tavus helps extract core competencies
+        for its *own agent's interview prep*, or you pass these as *context* to Tavus.
+        Let's simplify: User uploads, you store the file, and later *pass the text* from it to Gemini/Tavus.
+        Or, if Tavus truly handles "getting data from PDF resumes for job title and description,"
+        you'd use a Tavus specific endpoint for that.
+        """
+        # This part is highly dependent on *how* Tavus expects resume data for the agent.
+        # Common approaches:
+        # 1. Upload file and get a 'resume_id' from Tavus, which its agent uses.
+        # 2. Extract text from resume using pypdf/PyMuPDF *on your backend*, then send this text to Tavus/Gemini.
+
+        # Option 1: Hypothetical direct Tavus API for resume ingestion if available
+        # files = {'file': (filename, file_content, 'application/pdf')}
+        # return self._make_request('POST', 'resumes', files=files) # Example: '/v2/resumes'
+
+        # Option 2: Extract text here, then assume you'd feed this text to Gemini or pass as metadata to Tavus agent config.
+        # (You would need a PDF parser here first, e.g., pypdf)
+        return {"status": "success", "message": "Resume uploaded, needs further context extraction or integration."}
+
+
+    def create_livekit_agent_session(self, job_title, job_description, resume_summary_text, user_id):
+        """
+        Initiates a Tavus agent interview and gets LiveKit connection info.
+        Refer to https://docs.tavus.io/sections/conversational-video-interface/livekit-agent
+        """
+        # Example payload (adjust according to Tavus API docs):
+        payload = {
+            "interview_type": "job_mock",
+            "job_title": job_title,
+            "job_description": job_description,
+            "candidate_resume_summary": resume_summary_text, # Or Tavus resume ID
+            "metadata": {"user_id": str(user_id)} # Useful for tracking
+        }
+        # Check Tavus docs for the exact endpoint, e.g., 'conversational-videos' or 'agents/sessions'
+        # Assuming 'agent/livekit_session' for this example pathway
+        return self._make_request('POST', 'agent/livekit_session', data=payload)
+
+    # ... other Tavus related methods for status checks, getting transcript, etc.
+Use code with caution.
+Python
+Resume Routes (backend/app/routes/resume.py):
+/api/resume/upload (POST):
+Requires jwt_required().
+Accepts a PDF file.
+Saves file to UPLOAD_FOLDER.
+Parses PDF using pypdf or PyMuPDF to extract text content. Store raw text.
+Calls tavus_service.process_resume_for_interview_context (if applicable, or simply store).
+Saves Resume metadata (including file_path and raw_text_content) in DB.
+Returns confirmation.
+/api/resume (GET):
+Requires jwt_required().
+Returns list of user's uploaded resumes.
+/api/job_description (POST):
+Requires jwt_required().
+Allows user to input a job title and description text. Saves to JobDescription model.
+Can potentially integrate Gemini here to extract key skills/keywords from JD automatically.
+/api/job_description (GET):
+Requires jwt_required().
+Returns list of user's saved job descriptions.
+Frontend (React):
+Resume Upload Component (frontend/src/components/resume/ResumeUpload.jsx):
+File input element.
+Use FormData and Axios to send file to /api/resume/upload.
+Handle loading states and success/error messages.
+Job Description Input (frontend/src/components/job/JobDescriptionForm.jsx):
+Text areas for job title and description.
+Form submission to /api/job_description.
+Dashboard Integration: Display lists of uploaded resumes and saved job descriptions, allowing selection.
+Phase 4: Question Generation & Cheatsheet (Gemini & PDF Generation)
+Enable intelligent content generation for interview preparation.
+Backend (Flask):
+backend/app/services/gemini_service.py:
+import google.generativeai as genai
+from app.config import Config
+import json # For structured output parsing
+
+class GeminiService:
+    def __init__(self):
+        genai.configure(api_key=Config.GEMINI_API_KEY)
+        self.model = genai.GenerativeModel('gemini-pro') # Or gemini-1.0-pro etc.
+
+    def generate_interview_questions(self, job_description_text, resume_summary_text, num_questions=5):
+        prompt = f"""
+        You are an expert interviewer. Generate {num_questions} mock interview questions for a candidate.
+        The candidate's resume summary:
+        "{resume_summary_text}"
+
+        The job description they are applying for:
+        "{job_description_text}"
+
+        Questions should cover various aspects like behavioral, technical (if applicable), and situational.
+        Focus on questions that assess skills and experiences relevant to the job and unique to the resume.
+        Provide only the list of questions, formatted as a JSON array of strings.
+        Example: ["Question 1?", "Question 2?", ...]
+        """
+        response = self.model.generate_content(prompt)
+        try:
+            return json.loads(response.text.strip().replace('```json\n', '').replace('\n```', ''))
+        except json.JSONDecodeError:
+            return ["Error: Could not parse questions."] # Handle gracefully
+
+    def generate_cheatsheet_content(self, job_description_text, resume_summary_text):
+        prompt = f"""
+        You are an interview preparation assistant. Generate a concise cheatsheet based on the following
+        job description and candidate's resume.
+        Focus on key skills, experiences, and talking points the candidate should emphasize or be prepared to discuss.
+        Include 3-5 bullet points of "Key Strengths/Experiences to Highlight" and 3-5 "Potential Questions/Areas to Prepare."
+
+        Job Description:
+        "{job_description_text}"
+
+        Resume Summary:
+        "{resume_summary_text}"
+
+        Format the output clearly with headings like "Key Strengths to Highlight" and "Potential Questions/Areas to Prepare."
+        """
+        response = self.model.generate_content(prompt)
+        return response.text.strip()
+
+    def analyze_interview_transcript(self, interview_transcript, job_description_text, resume_summary_text):
+        prompt = f"""
+        Analyze the following mock interview transcript based on the provided job description and candidate resume.
+        Provide a score out of 100 and detailed feedback.
+        Focus on communication clarity, relevance of answers to questions and job description, demonstration of skills, and overall interview performance.
+
+        Job Description:
+        "{job_description_text}"
+
+        Candidate Resume Summary:
+        "{resume_summary_text}"
+
+        Interview Transcript:
+        "{interview_transcript}"
+
+        Provide the output in a JSON format with keys: "score" (integer), "feedback_summary" (string), "areas_for_improvement" (array of strings), "strengths" (array of strings).
+        Example:
+        {{
+          "score": 75,
+          "feedback_summary": "The candidate performed well...",
+          "areas_for_improvement": ["Elaborate more on XYZ.", "Structure answers with STAR method."],
+          "strengths": ["Clear communication.", "Demonstrated strong knowledge of ABC."]
+        }}
+        """
+        response = self.model.generate_content(prompt)
+        try:
+            return json.loads(response.text.strip().replace('```json\n', '').replace('\n```', ''))
+        except json.JSONDecodeError:
+            return {"score": 0, "feedback_summary": "Analysis failed.", "areas_for_improvement": [], "strengths": []}
+Use code with caution.
+Python
+PDF Generation Service (backend/app/services/pdf_service.py):
+Use reportlab or similar:
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+import os
+from app.config import Config
+
+class PDFService:
+    def generate_cheatsheet_pdf(self, content, user_id, filename="cheatsheet.pdf"):
+        pdf_dir = os.path.join(Config.GENERATED_PDFS_FOLDER, str(user_id))
+        os.makedirs(pdf_dir, exist_ok=True)
+        filepath = os.path.join(pdf_dir, filename)
+
+        doc = SimpleDocTemplate(filepath, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Split content into paragraphs
+        for line in content.split('\n'):
+            if line.strip(): # Add only non-empty lines
+                style = styles['Normal']
+                if line.strip().startswith('##') or line.strip().startswith('###'): # Basic heading detection
+                    style = styles['h2'] if line.strip().startswith('##') else styles['h3']
+                    line = line.replace('##', '').replace('###', '').strip()
+                elif line.strip().startswith('*'): # Bullet points
+                    style = styles['Bullet']
+                    line = line.replace('*', '').strip()
+
+                story.append(Paragraph(line, style))
+                story.append(Spacer(1, 0.1 * letter[1])) # Add a small space
+
+        doc.build(story)
+        return filepath
+Use code with caution.
+Python
+Interview Routes (backend/app/routes/interview.py):
+/api/interview/setup (POST):
+Receives resume_id, job_description_id.
+Fetch corresponding Resume and JobDescription data.
+Call gemini_service.generate_interview_questions() and store in DB.
+Call gemini_service.generate_cheatsheet_content().
+Call pdf_service.generate_cheatsheet_pdf().
+Store cheatsheet data (pdf_file_path) in DB.
+Returns generated question IDs and cheatsheet PDF URL.
+Frontend (React):
+Interview Setup Page (frontend/src/pages/InterviewSetupPage.jsx):
+UI to select an uploaded resume and a saved job description.
+Button to "Generate Interview & Cheatsheet".
+On success, display a link to download/view the generated cheatsheet PDF and enable the "Start Interview" button.
+Phase 5: The Interview - Real-time Interaction (Tavus Agent & LiveKit)
+This is the core interactive component.
+Backend (Flask):
+Interview Routes (backend/app/routes/interview.py continued):
+/api/interview/start (POST):
+Requires jwt_required().
+Receives interview_session_id.
+Fetch interview setup data (job, resume text, questions).
+Call tavus_service.create_livekit_agent_session() using the collected context (job title, job description text, resume summary/text from DB).
+Tavus API will return the livekit_url and livekit_token (and possibly Tavus agent_id/call_id).
+Update the InterviewSession model with tavus_call_id and livekit_room_name (or related ID from Tavus for the session).
+Return the livekit_url and livekit_token to the frontend.
+(Optional) If Tavus has webhooks for call events (e.g., call ends, transcript ready), set up an endpoint /api/tavus/webhook to receive and process these.
+Frontend (React):
+LiveKit Client Setup:
+npm install livekit-client livekit-react
+Interview Room Page (frontend/src/pages/InterviewRoomPage.jsx):
+This page will be dynamically rendered for the LiveKit video call.
+useRoomContext or direct Room component from livekit-react:
+import React, { useEffect, useRef, useState } from 'react';
+import { Room, useRoomContext, LiveKitRoom, useTracks } from '@livekit/react-components';
+import { ConnectionState, RoomEvent, Track } from 'livekit-client';
+import { useNavigate, useParams } from 'react-router-dom';
+import { startInterviewApi } from '../services/interviewApi'; // Your API service
+
+const InterviewRoomPage = () => {
+    const { interviewId } = useParams();
+    const navigate = useNavigate();
+    const [livekitUrl, setLivekitUrl] = useState('');
+    const [livekitToken, setLivekitToken] = useState('');
+    const [status, setStatus] = useState('initializing');
+    const [errorMessage, setErrorMessage] = useState('');
+    const room = useRef(null); // useRef to keep track of the LiveKit Room object
+
+    useEffect(() => {
+        const setupInterview = async () => {
+            try {
+                setStatus('connecting');
+                const res = await startInterviewApi(interviewId);
+                setLivekitUrl(res.livekit_url);
+                setLivekitToken(res.livekit_token);
+            } catch (error) {
+                console.error("Error starting interview:", error);
+                setErrorMessage("Failed to start interview: " + (error.response?.data?.message || error.message));
+                setStatus('error');
+            }
+        };
+
+        setupInterview();
+    }, [interviewId]);
+
+    const handleConnected = (roomInstance) => {
+        room.current = roomInstance;
+        console.log('Connected to LiveKit room!');
+        setStatus('connected');
+    };
+
+    const handleDisconnected = () => {
+        console.log('Disconnected from LiveKit room!');
+        setStatus('disconnected');
+        // Trigger post-interview process
+        // navigate(`/interview/${interviewId}/results`);
+    };
+
+    const handleError = (error) => {
+        console.error('LiveKit error:', error);
+        setErrorMessage('LiveKit connection error: ' + error.message);
+        setStatus('error');
+    };
+
+    if (status === 'error') {
+        return <div className="text-red-500 p-4">Error: {errorMessage}</div>;
+    }
+
+    if (!livekitUrl || !livekitToken || status !== 'connecting') {
+        return <div className="p-4">Loading interview session...</div>;
+    }
+
+    return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white">
+            <h1 className="text-2xl font-bold mb-4">Mock Interview with Tavus Agent</h1>
+            <LiveKitRoom
+                url={livekitUrl}
+                token={livekitToken}
+                connectOptions={{
+                    autoSubscribe: false, // Agent tracks only needed.
+                    adaptiveStream: true,
+                    dynacast: true,
+                    publishDefaults: {
+                        audioCaptureDefaults: { autoGainControl: false, echoCancellation: true, noiseSuppression: true },
+                        videoCaptureDefaults: { resolution: { width: 1280, height: 720 }, frameRate: 30 }
+                    }
+                }}
+                onConnected={handleConnected}
+                onDisconnected={handleDisconnected}
+                onError={handleError}
+                // Set up for your local video/audio input, and to display Tavus agent video
+                audio={true} // Allow user to transmit audio
+                video={true} // Allow user to transmit video
+            >
+                <MyLiveKitInterface />
+                {/* Optionally, display cheatsheet or questions in a sidebar */}
+            </LiveKitRoom>
+        </div>
+    );
+};
+
+const MyLiveKitInterface = () => {
+    const { room } = useRoomContext();
+    // You will need to filter tracks to display Tavus agent's video/audio.
+    // Tavus agent might appear as a specific participant or track ID.
+    const tracks = useTracks([Track.Source.Camera, Track.Source.Microphone]);
+
+    // Filter for Tavus agent's tracks - check Tavus LiveKit documentation for how their agent appears
+    const tavusTracks = tracks.filter(
+        trackRef => trackRef.participant.identity.startsWith('TAVUS_AGENT_ID_PREFIX') || // example prefix
+                     trackRef.participant.name === 'Tavus AI Interviewer' // example name
+    );
+
+    const userTracks = tracks.filter(
+        trackRef => trackRef.participant.isLocal // Local user tracks
+    );
+
+    useEffect(() => {
+        if (room) {
+            // Subscribe to Tavus agent tracks only when they appear
+            room.on(RoomEvent.ParticipantConnected, (participant) => {
+                if (participant.identity.startsWith('TAVUS_AGENT_ID_PREFIX')) { // Or whatever Tavus provides
+                    // This participant is your agent, ensure you render their video/audio
+                }
+            });
+            room.on(RoomEvent.TrackPublished, (publication, participant) => {
+                if (participant.identity.startsWith('TAVUS_AGENT_ID_PREFIX')) {
+                    // Agent's video or audio published
+                    publication.setSubscribed(true); // Ensure we subscribe to agent's tracks
+                }
+            });
+            // Also, allow publishing your own tracks:
+            room.localParticipant.enableCameraAndMicrophone(); // Make sure user can transmit
+        }
+    }, [room]);
+
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl p-4">
+            {userTracks.map(trackRef => (
+                <div key={trackRef.publication.trackSid} className="bg-gray-700 rounded-lg p-2 relative">
+                    <video ref={trackRef.publication.videoTrack?.attach()} className="w-full h-auto rounded" autoPlay playsInline muted={trackRef.participant.isLocal} />
+                    <audio ref={trackRef.publication.audioTrack?.attach()} autoPlay playsInline />
+                    <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-xs px-2 py-1 rounded">You</p>
+                </div>
+            ))}
+            {tavusTracks.map(trackRef => (
+                <div key={trackRef.publication.trackSid} className="bg-gray-700 rounded-lg p-2 relative">
+                    <video ref={trackRef.publication.videoTrack?.attach()} className="w-full h-auto rounded" autoPlay playsInline />
+                    <audio ref={trackRef.publication.audioTrack?.attach()} autoPlay playsInline />
+                    <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-xs px-2 py-1 rounded">Tavus Agent</p>
+                </div>
+            ))}
+            {tavusTracks.length === 0 && userTracks.length > 0 && (
+                <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-center h-48 md:h-full">
+                    <p>Waiting for Tavus AI Agent to connect...</p>
+                </div>
+            )}
+            {/* Add interview controls here: Mute/Unmute, Leave Call button */}
+            <div className="md:col-span-2 flex justify-center mt-4">
+                 <button
+                    onClick={() => {
+                        room?.disconnect(); // Disconnects from LiveKit room
+                        // Optionally trigger a cleanup/post-interview process on backend
+                    }}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                >
+                    End Interview
+                </button>
+            </div>
+        </div>
+    );
+};
+
+export default InterviewRoomPage;
+Use code with caution.
+Jsx
+Crucial: Pay close attention to the https://docs.tavus.io/sections/conversational-video-interface/livekit-agent documentation for identifying and rendering the Tavus agent's video/audio. The participant.identity or participant.name might be specific.
+Local Camera/Mic Access: The browser will prompt for camera/microphone permissions. livekit-client handles this.
+Controls: Implement UI for muting mic, turning off camera.
+Exit Call: Button to disconnect from LiveKit and end the session.
+Phase 6: Post-Interview & History
+Process interview results, store them, and display historical data.
+Backend (Flask):
+Post-Interview Processing Endpoint (backend/app/routes/interview.py):
+/api/interview/<session_id>/finish (POST or initiated by webhook):
+Triggered when an interview session ends (either user-initiated from frontend, or better, via a Tavus webhook for call.ended event if available).
+Retrieve the full interview transcript from Tavus (Tavus provides an API for fetching transcripts based on call_id).
+Call gemini_service.analyze_interview_transcript() with the transcript, job description, and resume summary.
+Receive the score and detailed feedback JSON from Gemini.
+Update the InterviewSession (status=completed) and create an InterviewResult entry in the DB.
+Store the full transcript (as text, or reference to file storage).
+Frontend (React):
+Interview Results Page (frontend/src/pages/InterviewResultPage.jsx):
+Accessed after an interview (e.g., redirect from InterviewRoomPage).
+Fetch InterviewResult for the given session_id from your Flask API (/api/interview/results/<session_id>).
+Display score, feedback summary, strengths, and areas for improvement using a clean, readable UI.
+Interview History Page (frontend/src/pages/InterviewHistoryPage.jsx):
+Fetch all InterviewSession data for the logged-in user from your Flask API (/api/interview/history).
+Display a table or list of past interviews: job title, date, score, and link to detailed results page.

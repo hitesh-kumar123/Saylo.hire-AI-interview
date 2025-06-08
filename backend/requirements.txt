@@ -1,0 +1,11 @@
+Flask
+Flask-SQLAlchemy
+psycopg2-binary
+python-dotenv
+Flask-CORS
+Flask-JWT-Extended
+Werkzeug
+requests
+pypdf
+reportlab
+google-generativeai 
