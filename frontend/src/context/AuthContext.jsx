@@ -10,6 +10,14 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Initialize axios headers from localStorage on mount
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    }
+  }, []);
+
   // Improved refreshToken function to update user data
   const refreshToken = async () => {
     const refresh_token = localStorage.getItem("refresh_token");
@@ -18,12 +26,9 @@ export const AuthProvider = ({ children }) => {
     try {
       console.log("Attempting to refresh token...");
 
-      // Method 1: Send as JSON body instead of empty object
       const response = await axios.post(
         "/api/auth/refresh",
-        {
-          // No need for a body - just use the Authorization header
-        },
+        {},
         {
           headers: {
             Authorization: `Bearer ${refresh_token}`,
@@ -59,8 +64,8 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Check authentication status on mount and when tokens change
   useEffect(() => {
-    // Check if user is already logged in
     const checkAuth = async () => {
       setLoading(true);
 
@@ -98,20 +103,40 @@ export const AuthProvider = ({ children }) => {
       }
     };
 
+    // Check auth on mount
     checkAuth();
+
+    // Set up storage event listener to handle logout in other tabs
+    const handleStorageChange = (e) => {
+      if (e.key === "access_token" && !e.newValue) {
+        // Token was removed in another tab
+        setUser(null);
+      } else if (e.key === "access_token" && e.newValue) {
+        // Token was added in another tab
+        checkAuth();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const login = async (email, password) => {
     setLoading(true);
     setError(null);
     try {
+      // alert("ok");
       const response = await axios.post("/api/auth/login", { email, password });
       const { access_token, refresh_token, user } = response.data;
-
+      console.log(access_token);
+      // Store tokens  in localStorage
       localStorage.setItem("access_token", access_token);
-      localStorage.setItem("refresh_token", refresh_token);
+      // localStorage.setItem("refresh_token", refresh_token);
+
+      // Set axios default headers
       axios.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
 
+      // Update user state
       setUser(user);
       return user;
     } catch (err) {
@@ -137,6 +162,25 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    // Try to call logout API if it exists (but don't wait for it)
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      axios
+        .post(
+          "/api/auth/logout",
+          {},
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        )
+        .catch(() => {
+          // Ignore errors from logout endpoint
+        });
+    }
+
+    // Clear local storage and state
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     delete axios.defaults.headers.common["Authorization"];

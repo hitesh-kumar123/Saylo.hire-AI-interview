@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { motion } from "framer-motion";
+import { useToast } from "../context/ToastContext";
 
 const AuthPage = ({ isLogin = true }) => {
   const [email, setEmail] = useState("");
@@ -11,12 +12,20 @@ const AuthPage = ({ isLogin = true }) => {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const { login, register } = useAuth();
+  const { login, register, user, loading } = useAuth();
+  const { success } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
 
   // Get the page they were trying to access before being redirected to login
   const from = location.state?.from?.pathname || "/dashboard";
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (!loading && user) {
+      navigate(from, { replace: true });
+    }
+  }, [user, loading, navigate, from]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,7 +34,9 @@ const AuthPage = ({ isLogin = true }) => {
 
     try {
       if (isLogin) {
-        await login(email, password);
+        const a = await login(email, password);
+
+        success("Login successful!");
         navigate(from, { replace: true });
       } else {
         await register({
@@ -35,7 +46,7 @@ const AuthPage = ({ isLogin = true }) => {
           last_name: lastName,
         });
         // After successful registration, show success message and redirect to login
-        alert("Registration successful! Please log in.");
+        success("Registration successful! Please log in.");
         navigate("/login", { replace: true });
       }
     } catch (err) {
@@ -65,6 +76,21 @@ const AuthPage = ({ isLogin = true }) => {
     hidden: { y: 20, opacity: 0 },
     visible: { y: 0, opacity: 1, transition: { duration: 0.5 } },
   };
+
+  // Show loading state while checking authentication
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="flex flex-col items-center">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-full absolute border-4 border-solid border-gray-200"></div>
+            <div className="w-16 h-16 rounded-full animate-spin absolute border-4 border-solid border-primary-600 border-t-transparent"></div>
+          </div>
+          <p className="mt-6 text-gray-600 font-medium">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex">
