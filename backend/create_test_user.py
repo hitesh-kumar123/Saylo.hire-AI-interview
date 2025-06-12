@@ -24,4 +24,4 @@ with app.app_context():
         
         print("Test user created successfully!")
         print(f"Email: test@example.com")
-        print(f"Password: password123") 
+        print(f"Password: password123")

@@ -13,4 +13,4 @@ with app.app_context():
     tables = db.metadata.tables.keys()
     print("\nCreated tables:")
     for table in tables:
-        print(f"- {table}") 
+        print(f"- {table}")

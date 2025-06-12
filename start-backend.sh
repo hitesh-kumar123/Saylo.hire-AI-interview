@@ -1,6 +1,12 @@
 #!/bin/bash
 
-echo "🚀 Starting Saylo.hire backend server..."
+echo "🚀 Starting Saylo.hire Backend..."
+
+# Check if we're in the right directory
+if [ ! -d "backend" ]; then
+    echo "❌ Error: backend directory not found. Please run from project root."
+    exit 1
+fi
 
 cd backend
 
@@ -11,14 +17,17 @@ if [ ! -d "venv" ]; then
 fi
 
 # Activate virtual environment
+echo "Activating virtual environment..."
 source venv/bin/activate
 
-# Check if .env file exists
-if [ ! -f ".env" ]; then
-    echo "❌ .env file not found. Please create backend/.env with required configuration."
+# Check if dependencies are installed
+if ! python -c "import flask" 2>/dev/null; then
+    echo "❌ Dependencies not installed. Please run ./setup.sh first."
     exit 1
 fi
 
-# Start the Flask server
-echo "✅ Starting Flask server on http://localhost:5000"
+# Start the Flask application
+echo "Starting Flask server on http://localhost:5000..."
+export FLASK_APP=run.py
+export FLASK_ENV=development
 python run.py
